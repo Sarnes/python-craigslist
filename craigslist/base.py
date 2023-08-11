@@ -212,11 +212,12 @@ class CraigslistBase(object):
         price = li_tag.find('div', class_='price')
         location_tag = li_tag.find('div', class_='location')
         if location_tag:
+            # Most valid locations are in the format of city, state.
+            # Craigslist's common format appears to be several spaces and lines down from the string
+            # This pattern only includes the spaces what are only between words, and extracts the words
             location = re.sub('\s{2,}', '', location_tag.text)
         result = {'title': name,
                   'url': url,
-                  # NOTE: Keeping 'datetime' for backwards
-                  # compatibility, use 'last_updated' instead.
                   'price': price.text if price else None,
                   'location': location,
                   # In very few cases, a posting will be included in the result
