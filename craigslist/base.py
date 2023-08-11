@@ -1,4 +1,5 @@
 import logging
+import re
 try:
     from Queue import Queue  # PY2
 except ImportError:
@@ -149,9 +150,8 @@ class CraigslistBase(object):
             self.logger.info('Response code: %s', response.status_code)
             response.raise_for_status()  # Something failed?
             soup = utils.bs(response.content)
-
-        totalcount = soup.find('span', {'class': 'totalcount'})
-        return int(totalcount.text) if totalcount else None
+        results = soup.find_all('li', {'class': 'cl-static-search-result'})
+        return len(results) if results else None
 
     def get_results(self, limit=None, start=0, sort_by=None, geotagged=False,
                     include_details=False):
@@ -187,15 +187,15 @@ class CraigslistBase(object):
             if not total:
                 total = self.get_results_approx_count(soup=soup)
 
-            rows = soup.find('ul', {'class': 'rows'})
-            for row in rows.find_all('li', {'class': 'result-row'},
+            li_tags = soup.find('ol', {'class': 'cl-static-search-results'})
+            for li_tag in li_tags.find_all('li', {'class': 'cl-static-search-result'},
                                      recursive=False):
                 if limit is not None and results_yielded >= limit:
                     break
                 self.logger.debug('Processing %s of %s results ...',
                                   total_so_far + 1, total or '(undefined)')
 
-                yield self.process_row(row, geotagged, include_details)
+                yield self.process_li_tag(li_tag, geotagged, include_details)
 
                 results_yielded += 1
                 total_so_far += 1
@@ -206,39 +206,19 @@ class CraigslistBase(object):
                 break
             start = total_so_far
 
-    def process_row(self, row, geotagged=False, include_details=False):
-        id = row.attrs['data-pid']
-        repost_of = row.attrs.get('data-repost-of')
-
-        link = row.find('a', {'class': 'hdrlnk'})
-        name = link.text
-        url = urljoin(self.url, link.attrs['href'])
-
-        time = row.find('time')
-        if time:
-            datetime = time.attrs['datetime']
-        else:
-            pl = row.find('span', {'class': 'pl'})
-            datetime = pl.text.split(':')[0].strip() if pl else None
-        price = row.find('span', {'class': 'result-price'})
-        where = row.find('span', {'class': 'result-hood'})
-        if where:
-            where = where.text.strip()[1:-1]  # remove ()
-        tags_span = row.find('span', {'class': 'result-tags'})
-        tags = tags_span.text if tags_span else ''
-
-        result = {'id': id,
-                  'repost_of': repost_of,
-                  'name': name,
+    def process_li_tag(self, li_tag, geotagged=False, include_details=False):
+        name = li_tag.attrs.get('title')
+        url = li_tag.find('a').attrs.get('href')
+        price = li_tag.find('div', class_='price')
+        location_tag = li_tag.find('div', class_='location')
+        if location_tag:
+            location = re.sub('\s{2,}', '', location_tag.text)
+        result = {'title': name,
                   'url': url,
                   # NOTE: Keeping 'datetime' for backwards
                   # compatibility, use 'last_updated' instead.
-                  'datetime': datetime,
-                  'last_updated': datetime,
                   'price': price.text if price else None,
-                  'where': where,
-                  'has_image': 'pic' in tags,
-                  'geotag': None,
+                  'location': location,
                   # In very few cases, a posting will be included in the result
                   # list but it has already been deleted (or it has been
                   # deleted after the list was retrieved). In that case, this
@@ -295,7 +275,7 @@ class CraigslistBase(object):
         # some inner elements that we want to ignore.
         body_text = (getattr(e, 'text', e) for e in body
                      if not getattr(e, 'attrs', None))
-        result['body'] = ''.join(body_text).strip()
+        result['description'] = ''.join(body_text).strip()
 
         # Add created time (in case it's different from last updated).
         postinginfos = soup.find('div', {'class': 'postinginfos'})
@@ -332,8 +312,8 @@ class CraigslistBase(object):
                 attr_text = attr.text.strip()
                 if attr_text:
                     attrs.append(attr_text)
-        result['attrs'] = attrs
         if attrs:
+            result['attrs'] = attrs
             self.parse_attrs(result)
 
         # If an address is included, add it to `address`.
