@@ -150,8 +150,9 @@ class CraigslistBase(object):
             self.logger.info('Response code: %s', response.status_code)
             response.raise_for_status()  # Something failed?
             soup = utils.bs(response.content)
-        results = soup.find_all('li', {'class': 'cl-static-search-result'})
-        return len(results) if results else None
+        li_tags = soup.find('ol', {'class': 'cl-static-search-results'})
+        results = len(li_tags.find_all('li', {'class': 'cl-static-search-result'}))
+        return results if results else None
 
     def get_results(self, limit=None, start=0, sort_by=None, geotagged=False,
                     include_details=False):
@@ -186,7 +187,8 @@ class CraigslistBase(object):
             soup = utils.bs(response.content)
             if not total:
                 total = self.get_results_approx_count(soup=soup)
-
+            if not limit:
+                limit = total
             li_tags = soup.find('ol', {'class': 'cl-static-search-results'})
             for li_tag in li_tags.find_all('li', {'class': 'cl-static-search-result'},
                                      recursive=False):
