@@ -261,6 +261,19 @@ class CraigslistBase(object):
 
         return result
 
+
+    @staticmethod
+    def add_attrs_to_text(attrs):
+        attributes = " "
+        for attr in attrs:
+            if attr == attrs[-1]:
+                attributes += attr
+                continue
+            attributes += f"{attr}\n"
+        return attributes
+
+    
+
     def include_details(self, result, soup):
         """ Adds description, images to result """
 
@@ -290,7 +303,7 @@ class CraigslistBase(object):
                     # and the timezone to make it the same format as
                     # 'last_updated'.
                     created = time.attrs['datetime'].replace('T', ' ')
-                    result['created'] = created.rsplit(':', 1)[0]
+                    result['date posted'] = created.rsplit(':', 1)[0]
 
         # Add images' urls.
         image_tags = soup.find_all('img')
@@ -317,8 +330,9 @@ class CraigslistBase(object):
                     attrs.append(attr_text)
         if attrs:
             result['attrs'] = attrs
-            self.parse_attrs(result)
-
+            # self.parse_attrs(result)
+        attributes_as_str = self.add_attrs_to_text(attrs)
+        result["features_listed"] = attributes_as_str
         # If an address is included, add it to `address`.
         mapaddress = soup.find('div', {'class': 'mapaddress'})
         if mapaddress:
