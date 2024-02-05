@@ -1,10 +1,12 @@
 import logging
 import re
+
 try:
     from Queue import Queue  # PY2
 except ImportError:
     from queue import Queue  # PY3
 from threading import Thread
+
 try:
     from urlparse import urljoin  # PY2
 except ImportError:
@@ -12,7 +14,8 @@ except ImportError:
 
 from six import iteritems
 from six.moves import range
-
+import random
+import time
 from . import utils
 
 ALL_SITES = utils.get_all_sites()  # All the Craiglist sites
@@ -20,25 +23,25 @@ RESULTS_PER_REQUEST = 100  # Craigslist returns 100 results per request
 
 
 class CraigslistBase(object):
-    """ Base class for all Craiglist wrappers. """
+    """Base class for all Craiglist wrappers."""
 
     url_templates = {
-        'base': 'http://%(site)s.craigslist.org',
-        'no_area': 'http://%(site)s.craigslist.org/search/%(category)s',
-        'area': 'http://%(site)s.craigslist.org/search/%(area)s/%(category)s'
+        "base": "http://%(site)s.craigslist.org",
+        "no_area": "http://%(site)s.craigslist.org/search/%(category)s",
+        "area": "http://%(site)s.craigslist.org/search/%(area)s/%(category)s",
     }
 
-    default_site = 'sfbay'
+    default_site = "sfbay"
     default_category = None
 
     base_filters = {
-        'query': {'url_key': 'query', 'value': None},
-        'search_titles': {'url_key': 'srchType', 'value': 'T'},
-        'has_image': {'url_key': 'hasPic', 'value': 1},
-        'posted_today': {'url_key': 'postedToday', 'value': 1},
-        'bundle_duplicates': {'url_key': 'bundleDuplicates', 'value': 1},
-        'search_distance': {'url_key': 'search_distance', 'value': None},
-        'zip_code': {'url_key': 'postal', 'value': None},
+        "query": {"url_key": "query", "value": None},
+        "search_titles": {"url_key": "srchType", "value": "T"},
+        "has_image": {"url_key": "hasPic", "value": 1},
+        "posted_today": {"url_key": "postedToday", "value": 1},
+        "bundle_duplicates": {"url_key": "bundleDuplicates", "value": 1},
+        "search_distance": {"url_key": "search_distance", "value": None},
+        "zip_code": {"url_key": "postal", "value": None},
     }
     extra_filters = {}
     __list_filters = {}  # Cache for list filters requested by URL
@@ -47,13 +50,19 @@ class CraigslistBase(object):
     custom_result_fields = False
 
     sort_by_options = {
-        'newest': 'date',
-        'price_asc': 'priceasc',
-        'price_desc': 'pricedsc',
+        "newest": "date",
+        "price_asc": "priceasc",
+        "price_desc": "pricedsc",
     }
 
-    def __init__(self, site=None, area=None, category=None, filters=None,
-                 log_level=logging.WARNING):
+    def __init__(
+        self,
+        site=None,
+        area=None,
+        category=None,
+        filters=None,
+        log_level=logging.WARNING,
+    ):
         # Logging
         self.set_logger(log_level, init=True)
 
@@ -72,10 +81,13 @@ class CraigslistBase(object):
 
         self.category = category or self.default_category
 
-        url_template = self.url_templates['area' if area else 'no_area']
-        self.url = url_template % {'site': self.site, 'area': self.area,
-                                   'category': self.category}
-
+        url_template = self.url_templates["area" if area else "no_area"]
+        self.url = url_template % {
+            "site": self.site,
+            "area": self.area,
+            "category": self.category,
+        }
+        self.formatted_url = ""
         self.filters = self.get_filters(filters)
 
     def get_filters(self, filters):
@@ -87,17 +99,19 @@ class CraigslistBase(object):
         # included. The solution is a bit counter-intuitive, but to force this
         # not to happen, we set searchNearby=True, but not pass any
         # nearbyArea=X, thus showing no similar listings.
-        parsed_filters = {'searchNearby': 1}
+        parsed_filters = {"searchNearby": 1}
 
         for key, value in iteritems((filters or {})):
             try:
-                filter_ = (self.base_filters.get(key) or
-                           self.extra_filters.get(key) or
-                           list_filters[key])
-                if filter_['value'] is None:
-                    parsed_filters[filter_['url_key']] = value
-                elif isinstance(filter_['value'], dict):
-                    valid_options = filter_['value']
+                filter_ = (
+                    self.base_filters.get(key)
+                    or self.extra_filters.get(key)
+                    or list_filters[key]
+                )
+                if filter_["value"] is None:
+                    parsed_filters[filter_["url_key"]] = value
+                elif isinstance(filter_["value"], dict):
+                    valid_options = filter_["value"]
                     if not utils.isiterable(value) or isinstance(value, str):
                         value = [value]  # Force to list
                     options = []
@@ -106,12 +120,11 @@ class CraigslistBase(object):
                             options.append(valid_options[opt])
                         except KeyError:
                             self.logger.warning(
-                                "'%s' is not a valid option for %s"
-                                % (opt, key)
+                                "'%s' is not a valid option for %s" % (opt, key)
                             )
-                    parsed_filters[filter_['url_key']] = options
+                    parsed_filters[filter_["url_key"]] = options
                 elif value:  # Don't add filter if ...=False
-                    parsed_filters[filter_['url_key']] = filter_['value']
+                    parsed_filters[filter_["url_key"]] = filter_["value"]
             except KeyError:
                 self.logger.warning("'%s' is not a valid filter", key)
 
@@ -119,19 +132,20 @@ class CraigslistBase(object):
 
     def set_logger(self, log_level, init=False):
         if init:
-            self.logger = logging.getLogger('python-craiglist')
+            self.logger = logging.getLogger("python-craiglist")
             self.handler = logging.StreamHandler()
             self.logger.addHandler(self.handler)
         self.logger.setLevel(log_level)
         self.handler.setLevel(log_level)
 
     def is_valid_area(self, area):
-        base_url = self.url_templates['base']
-        response = utils.requests_get(base_url % {'site': self.site},
-                                      logger=self.logger)
+        base_url = self.url_templates["base"]
+        response = utils.requests_get(
+            base_url % {"site": self.site}, logger=self.logger
+        )
         soup = utils.bs(response.content)
-        sublinks = soup.find('ul', {'class': 'sublinks'})
-        return sublinks and sublinks.find('a', text=area) is not None
+        sublinks = soup.find("ul", {"class": "sublinks"})
+        return sublinks and sublinks.find("a", text=area) is not None
 
     def get_results_approx_count(self, soup=None):
         """
@@ -144,18 +158,26 @@ class CraigslistBase(object):
         """
 
         if soup is None:
-            response = utils.requests_get(self.url, params=self.filters,
-                                          logger=self.logger)
-            self.logger.info('GET %s', response.url)
-            self.logger.info('Response code: %s', response.status_code)
+            response = utils.requests_get(
+                self.url, params=self.filters, logger=self.logger
+            )
+            self.logger.info("GET %s", response.url)
+            self.logger.info("Response code: %s", response.status_code)
             response.raise_for_status()  # Something failed?
             soup = utils.bs(response.content)
-        li_tags = soup.find('ol', {'class': 'cl-static-search-results'})
-        results = len(li_tags.find_all('li', {'class': 'cl-static-search-result'}))
+        li_tags = soup.find("ol", {"class": "cl-static-search-results"})
+        results = len(li_tags.find_all("li", {"class": "cl-static-search-result"}))
         return results if results else None
 
-    def get_results(self, limit=None, start=0, sort_by=None, geotagged=False,
-                    include_details=False):
+    def get_results(
+        self,
+        limit=None,
+        start=0,
+        sort_by=None,
+        geotagged=False,
+        include_details=False,
+        search: str = None,
+    ):
         """
         Gets results from Craigslist based on the specified filters.
 
@@ -165,10 +187,12 @@ class CraigslistBase(object):
 
         if sort_by:
             try:
-                self.filters['sort'] = self.sort_by_options[sort_by]
+                self.filters["sort"] = self.sort_by_options[sort_by]
             except KeyError:
-                msg = ("'%s' is not a valid sort_by option, "
-                       "use: 'newest', 'price_asc' or 'price_desc'" % sort_by)
+                msg = (
+                    "'%s' is not a valid sort_by option, "
+                    "use: 'newest', 'price_asc' or 'price_desc'" % sort_by
+                )
                 self.logger.error(msg)
                 raise ValueError(msg)
 
@@ -177,27 +201,32 @@ class CraigslistBase(object):
         total = 0
 
         while True:
-            self.filters['s'] = start
-            response = utils.requests_get(self.url, params=self.filters,
-                                          logger=self.logger)
-            self.logger.info('GET %s', response.url)
-            self.logger.info('Response code: %s', response.status_code)
+            self.filters["s"] = start
+            response = utils.requests_get(
+                self.url, params=self.filters, logger=self.logger
+            )
+            self.logger.info("GET %s", response.url)
+            self.logger.info("Response code: %s", response.status_code)
             response.raise_for_status()  # Something failed?
 
             soup = utils.bs(response.content)
             if not total:
                 total = self.get_results_approx_count(soup=soup)
+            li_tags = soup.find("ol", {"class": "cl-static-search-results"})
             if not limit:
                 limit = total
-            li_tags = soup.find('ol', {'class': 'cl-static-search-results'})
-            for li_tag in li_tags.find_all('li', {'class': 'cl-static-search-result'},
-                                     recursive=False):
+            for li_tag in li_tags.find_all(
+                "li", {"class": "cl-static-search-result"}, recursive=False
+            ):
                 if limit is not None and results_yielded >= limit:
                     break
-                self.logger.debug('Processing %s of %s results ...',
-                                  total_so_far + 1, total or '(undefined)')
+                self.logger.debug(
+                    "Processing %s of %s results ...",
+                    total_so_far + 1,
+                    total or "(undefined)",
+                )
 
-                yield self.process_li_tag(li_tag, geotagged, include_details)
+                yield self.process_li_tag(li_tag, search, geotagged, include_details)
 
                 results_yielded += 1
                 total_so_far += 1
@@ -208,59 +237,131 @@ class CraigslistBase(object):
                 break
             start = total_so_far
 
-    def process_li_tag(self, li_tag, geotagged=False, include_details=False):
-        name = li_tag.attrs.get('title')
-        url = li_tag.find('a').attrs.get('href')
-        price = li_tag.find('div', class_='price')
-        location_tag = li_tag.find('div', class_='location')
-        if location_tag:
-            # Most valid locations are in the format of city, state.
-            # Craigslist's common format appears to be several spaces and lines down from the string
-            # This pattern only includes the spaces what are only between words, and extracts the words
-            location = re.sub('\s{2,}', '', location_tag.text)
-        result = {'title': name,
-                  'url': url,
-                  'price': price.text if price else None,
-                  'location': location,
-                  # In very few cases, a posting will be included in the result
-                  # list but it has already been deleted (or it has been
-                  # deleted after the list was retrieved). In that case, this
-                  # field will be marked as True. If you want to be extra
-                  # careful, always check this field is False before using a
-                  # result.
-                  'deleted': False}
-
-        if geotagged or include_details:
-            detail_soup = self.fetch_content(result['url'])
-            if detail_soup:
-                if geotagged:
-                    self.geotag_result(result, detail_soup)
-                if include_details:
-                    self.include_details(result, detail_soup)
-
-        if self.custom_result_fields:
-            self.customize_result(result)
-
+    def process_li_tag(self, li_tag, product, geotagged=False, include_details=False):
+        name = li_tag.attrs.get("title")
+        url = li_tag.find("a").attrs.get("href")
+        price = li_tag.find("div", class_="price")
+        location_tag = li_tag.find("div", class_="location")
+        # Most valid locations are in the format of city, state.
+        # Craigslist's common format appears to be several spaces and lines down from the string
+        # This pattern only includes the spaces what are only between words, and extracts the words and spaces
+        location = re.sub("\s{2,}", "", location_tag.text) if location_tag else None
+        result = {
+            "search": product,
+            "market": "Craigslist",
+            "title": name,
+            "url": url,
+            "price": price.text if price else None,
+            "location": location,
+            # In very few cases, a posting will be included in the result
+            # list but it has already been deleted (or it has been
+            # deleted after the list was retrieved). In that case, this
+            # field will be marked as True. If you want to be extra
+            # careful, always check this field is False before using a
+            # result.
+            "deleted": False,
+        }
         return result
 
+    def fetch_details(self, result, geotagged=True):
+        detail_soup = self.fetch_content(result["url"])
+        time.sleep(self.random_num(0, 3))
+        if detail_soup:
+            if geotagged:
+                self.geotag_result(result, detail_soup)
+            self.include_details(result, detail_soup)
+        if self.custom_result_fields:
+            self.customize_result(result)
+        return result
+
+    @staticmethod
+    def random_num(start=2, end=10) -> int:
+        return random.randrange(start, end)
+
     def customize_result(self, result):
-        """ Adds custom/delete/alter fields to result. """
+        """Adds custom/delete/alter fields to result."""
         # Override in subclass to add category-specific fields.
         # FYI: `attrs` will only be presented if include_details was True.
         pass
 
     def geotag_result(self, result, soup):
-        """ Adds (lat, lng) to result. """
+        """Adds (lat, lng) to result."""
 
-        self.logger.debug('Geotagging result ...')
+        self.logger.debug("Geotagging result ...")
 
-        map_ = soup.find('div', {'id': 'map'})
+        map_ = soup.find("div", {"id": "map"})
         if map_:
-            result['geotag'] = (float(map_.attrs['data-latitude']),
-                                float(map_.attrs['data-longitude']))
+            result["geotag"] = (
+                float(map_.attrs["data-latitude"]),
+                float(map_.attrs["data-longitude"]),
+            )
 
         return result
 
+    def include_details(self, result, soup):
+        """Adds description, images to result"""
+
+        self.logger.debug("Adding details to result...")
+
+        body = soup.find("section", id="postingbody")
+
+        if not body:
+            # This should only happen when the posting has been deleted by its
+            # author.
+            result["deleted"] = True
+            return
+
+        # We need to massage the data a little bit because it might include
+        # some inner elements that we want to ignore.
+        body_text = (
+            getattr(e, "text", e) for e in body if not getattr(e, "attrs", None)
+        )
+        result["description"] = "".join(body_text).strip()
+
+        # Add created time (in case it's different from last updated).
+        postinginfos = soup.find("div", {"class": "postinginfos"})
+        for p in postinginfos.find_all("p"):
+            if "posted" in p.text:
+                time = p.find("time")
+                if time:
+                    # This date is in ISO format. I'm removing the T literal
+                    # and the timezone to make it the same format as
+                    # 'last_updated'.
+                    created = time.attrs["datetime"].replace("T", " ")
+                    result["date posted"] = created.rsplit(":", 1)[0]
+
+        # Add images' urls.
+        image_tags = soup.find_all("img")
+        # If there's more than one picture, the first one will be repeated.
+        image_tags = image_tags[1:] if len(image_tags) > 1 else image_tags
+        images = []
+        for img in image_tags:
+            try:
+                img_link = img["src"].replace("50x50c", "600x450")
+                images.append(img_link)
+            except KeyError:
+                continue  # Some posts contain empty <img> tags.
+        result["images"] = images
+
+        # Add list of attributes as unparsed strings. These values are then
+        # processed by `parse_attrs`, and are available to be post-processed
+        # by subclasses.
+        attrgroups = soup.find_all("p", {"class": "attrgroup"})
+        attrs = []
+        for attrgroup in attrgroups:
+            for attr in attrgroup.find_all("span"):
+                attr_text = attr.text.strip()
+                if attr_text:
+                    attrs.append(attr_text)
+        if attrs:
+            result["attrs"] = attrs
+            # self.parse_attrs(result)
+        attributes_as_str = self.add_attrs_to_text(attrs)
+        result["features_listed"] = attributes_as_str
+        # If an address is included, add it to `address`.
+        mapaddress = soup.find("div", {"class": "mapaddress"})
+        if mapaddress:
+            result["address"] = mapaddress.text
 
     @staticmethod
     def add_attrs_to_text(attrs):
@@ -272,104 +373,40 @@ class CraigslistBase(object):
             attributes += f"{attr}\n"
         return attributes
 
-    
-
-    def include_details(self, result, soup):
-        """ Adds description, images to result """
-
-        self.logger.debug('Adding details to result...')
-
-        body = soup.find('section', id='postingbody')
-
-        if not body:
-            # This should only happen when the posting has been deleted by its
-            # author.
-            result['deleted'] = True
-            return
-
-        # We need to massage the data a little bit because it might include
-        # some inner elements that we want to ignore.
-        body_text = (getattr(e, 'text', e) for e in body
-                     if not getattr(e, 'attrs', None))
-        result['description'] = ''.join(body_text).strip()
-
-        # Add created time (in case it's different from last updated).
-        postinginfos = soup.find('div', {'class': 'postinginfos'})
-        for p in postinginfos.find_all('p'):
-            if 'posted' in p.text:
-                time = p.find('time')
-                if time:
-                    # This date is in ISO format. I'm removing the T literal
-                    # and the timezone to make it the same format as
-                    # 'last_updated'.
-                    created = time.attrs['datetime'].replace('T', ' ')
-                    result['date posted'] = created.rsplit(':', 1)[0]
-
-        # Add images' urls.
-        image_tags = soup.find_all('img')
-        # If there's more than one picture, the first one will be repeated.
-        image_tags = image_tags[1:] if len(image_tags) > 1 else image_tags
-        images = []
-        for img in image_tags:
-            try:
-                img_link = img['src'].replace('50x50c', '600x450')
-                images.append(img_link)
-            except KeyError:
-                continue  # Some posts contain empty <img> tags.
-        result['images'] = images
-
-        # Add list of attributes as unparsed strings. These values are then
-        # processed by `parse_attrs`, and are available to be post-processed
-        # by subclasses.
-        attrgroups = soup.find_all('p', {'class': 'attrgroup'})
-        attrs = []
-        for attrgroup in attrgroups:
-            for attr in attrgroup.find_all('span'):
-                attr_text = attr.text.strip()
-                if attr_text:
-                    attrs.append(attr_text)
-        if attrs:
-            result['attrs'] = attrs
-            # self.parse_attrs(result)
-        attributes_as_str = self.add_attrs_to_text(attrs)
-        result["features_listed"] = attributes_as_str
-        # If an address is included, add it to `address`.
-        mapaddress = soup.find('div', {'class': 'mapaddress'})
-        if mapaddress:
-            result['address'] = mapaddress.text
-
     def parse_attrs(self, result):
         """Parses raw attributes into structured fields in the result dict."""
 
         # Parse binary fields first by checking their presence.
-        attrs = set(attr.lower() for attr in result['attrs'])
+        attrs = set(attr.lower() for attr in result["attrs"])
         for key, options in iteritems(self.extra_filters):
-            if options['value'] != 1:
+            if options["value"] != 1:
                 continue  # Filter is not binary
-            if options.get('attr', '') in attrs:
+            if options.get("attr", "") in attrs:
                 result[key] = True
         # Values from list filters are sometimes shown as {filter}: {value}
         # e.g. "transmission: automatic", although usually they are shown only
         # with the {value}, e.g. "laundry in bldg". By stripping the content
         # before the colon (if any) we reduce it to a single case.
-        attrs_after_colon = set(
-            attr.split(': ', 1)[-1] for attr in result['attrs'])
+        attrs_after_colon = set(attr.split(": ", 1)[-1] for attr in result["attrs"])
         for key, options in iteritems(self.get_list_filters(self.url)):
-            for option in options['value'].keys():
+            for option in options["value"].keys():
                 if option in attrs_after_colon:
                     result[key] = option
                     break
 
     def fetch_content(self, url):
         response = utils.requests_get(url, logger=self.logger)
-        self.logger.info('GET %s', response.url)
-        self.logger.info('Response code: %s', response.status_code)
+        self.logger.info("GET %s", response.url)
+        self.logger.info("Response code: %s", response.status_code)
 
         if response.ok:
             return utils.bs(response.content)
 
-        self.logger.warning("GET %s returned not OK response code: %s "
-                            "(skipping)", url, response.status_code)
+        self.logger.warning(
+            "GET %s returned not OK response code: %s " "(skipping)",
+            url,
+            response.status_code,
+        )
         return None
 
     def geotag_results(self, results, workers=8):
@@ -386,8 +423,7 @@ class CraigslistBase(object):
 
         def geotagger():
             while not queue.empty():
-                self.logger.debug('%s results left to geotag ...',
-                                  queue.qsize())
+                self.logger.debug("%s results left to geotag ...", queue.qsize())
                 self.geotag_result(queue.get())
                 queue.task_done()
 
@@ -417,7 +453,7 @@ class CraigslistBase(object):
         soup = utils.bs(response.content)
 
         cat_html = soup.find_all("input", {"class": "catcheck multi_checkbox"})
-        cat_ids = [html.get('data-abb') for html in cat_html]
+        cat_ids = [html.get("data-abb") for html in cat_html]
         cat_html = soup.find_all("a", {"class": "category"})
         cat_names = [html.contents[0] for html in cat_html]
 
@@ -427,24 +463,23 @@ class CraigslistBase(object):
 
     @classmethod
     def show_filters(cls, category=None):
-        print('Base filters:')
+        print("Base filters:")
         for key, options in iteritems(cls.base_filters):
-            value_as_str = '...' if options['value'] is None else 'True/False'
-            print('* %s = %s' % (key, value_as_str))
+            value_as_str = "..." if options["value"] is None else "True/False"
+            print("* %s = %s" % (key, value_as_str))
 
         if category is None:
             print("\n%s filters:" % cls.__name__)
         else:
             print("\n%s filters for category '%s':" % (cls.__name__, category))
         for key, options in iteritems(cls.extra_filters):
-            value_as_str = '...' if options['value'] is None else 'True/False'
-            print('* %s = %s' % (key, value_as_str))
-        url = cls.url_templates['no_area'] % {
-            'site': cls.default_site,
-            'category': category or cls.default_category,
+            value_as_str = "..." if options["value"] is None else "True/False"
+            print("* %s = %s" % (key, value_as_str))
+        url = cls.url_templates["no_area"] % {
+            "site": cls.default_site,
+            "category": category or cls.default_category,
         }
         list_filters = cls.get_list_filters(url)
         for key, options in iteritems(list_filters):
-            value_as_str = ', '.join(
-                repr(opt) for opt in options['value'].keys())
-            print('* %s = %s' % (key, value_as_str))
+            value_as_str = ", ".join(repr(opt) for opt in options["value"].keys())
+            print("* %s = %s" % (key, value_as_str))
