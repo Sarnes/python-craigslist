@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 import requests
+import os
 from requests.exceptions import RequestException
 
 ALL_SITES_URL = 'http://www.craigslist.org/about/sites'
@@ -25,8 +26,12 @@ def requests_get(*args, **kwargs):
     """
 
     logger = kwargs.pop('logger', None)
+    proxies = {
+        "http": f"http://{os.getenv('PROXY_USERNAME')}:{os.getenv('PROXY_PASSWORD')}_country-us_city-tampa@{os.getenv('PROXY_HOST')}:{os.getenv('PROXY_PORT')}",
+        "https": f"http://{os.getenv('PROXY_USERNAME')}:{os.getenv('PROXY_PASSWORD')}_country-us_city-tampa@{os.getenv('PROXY_HOST')}:{os.getenv('PROXY_PORT')}"
+    }
     # Set default User-Agent header if not defined.
-    kwargs.setdefault('headers', {}).setdefault('User-Agent', USER_AGENT)
+    kwargs.setdefault('headers', {}).setdefault('User-Agent', USER_AGENT).setdefault('proxies', proxies)
 
     try:
         return requests.get(*args, **kwargs)
