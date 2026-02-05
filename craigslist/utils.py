@@ -1,7 +1,8 @@
 from bs4 import BeautifulSoup
 import requests
 import os
-from requests.exceptions import RequestException
+import socket
+from requests.exceptions import RequestException, ConnectionError, Timeout
 
 ALL_SITES_URL = 'http://www.craigslist.org/about/sites'
 SITE_URL = 'http://%s.craigslist.org'
@@ -22,13 +23,35 @@ def isiterable(var):
 def requests_get(*args, **kwargs):
     """
     Retries network errors up to 3 times.
+    Adds proxy when not in DEBUG mode.
     """
-
     logger = kwargs.pop('logger', None)
 
-    # Set default User-Agent header if not defined.
-    kwargs.setdefault('headers', {}).setdefault('User-Agent', USER_AGENT)
+    # Set default User-Agent if not provided
+    headers = kwargs.setdefault('headers', {})
+    headers.setdefault('User-Agent', USER_AGENT)
 
+    # ───────────────────────────────────────────────
+    # Proxy logic - only apply when NOT in debug mode
+    # ───────────────────────────────────────────────
+    if not bool(os.getenv("DEBUG")):
+        http_proxy  = f'http://{os.getenv("PROXY_USERNAME")}-country-us:{os.getenv("PROXY_PASSWORD")}@{os.getenv("PROXY_HOST")}:{os.getenv("PROXY_PORT")}'
+
+        if http_proxy:
+            proxies = {}
+            if http_proxy:
+                proxies["http"] = http_proxy 
+                proxies["https"] = http_proxy 
+
+            # Only add proxies dict if we actually have something
+            if proxies:
+                kwargs["proxies"] = proxies
+                if logger:
+                    logger.debug("Using proxies: %s", proxies)
+
+    # ───────────────────────────────────────────────
+    # Retry logic
+    # ───────────────────────────────────────────────
     max_retries = 3
     last_exc = None
 
@@ -45,11 +68,11 @@ def requests_get(*args, **kwargs):
                     attempt, max_retries, exc
                 )
 
-            # small exponential backoff: 0.5s, 1s, 2s
             if attempt < max_retries:
+                # exponential backoff: 0.5s → 1s → 2s
                 time.sleep(0.5 * (2 ** (attempt - 1)))
 
-    # If all retries failed, re-raise last exception
+    # All retries failed
     raise last_exc
 
 
