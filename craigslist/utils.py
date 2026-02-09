@@ -36,7 +36,7 @@ def requests_get(*args, **kwargs):
     # Proxy logic - only apply when NOT in debug mode
     # ───────────────────────────────────────────────
     if not bool(os.getenv("DEBUG")):
-        http_proxy  = f'http://{os.getenv("PROXY_USERNAME")}-country-us:{os.getenv("PROXY_PASSWORD")}@{os.getenv("PROXY_HOST")}:{os.getenv("PROXY_PORT")}'
+        http_proxy  = f'http://{os.getenv("PROXY_USERNAME")}-country-US:{os.getenv("PROXY_PASSWORD")}@{os.getenv("PROXY_HOST")}:{os.getenv("PROXY_PORT")}'
 
         if http_proxy:
             proxies = {}
