@@ -245,7 +245,7 @@ class CraigslistBase(object):
         # Most valid locations are in the format of city, state.
         # Craigslist's common format appears to be several spaces and lines down from the string
         # This pattern only includes the spaces what are only between words, and extracts the words and spaces
-        location = re.sub("\s{2,}", "", location_tag.text) if location_tag else None
+        location = re.sub(r"\s{2,}", "", location_tag.text) if location_tag else None
         result = {
             "search": product,
             "market": "Craigslist",
