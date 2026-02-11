@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 import requests
-import os
 import time
+import os
 import socket
 from requests.exceptions import RequestException, ConnectionError, Timeout
 
@@ -58,6 +58,9 @@ def requests_get(*args, **kwargs):
 
     for attempt in range(1, max_retries + 1):
         try:
+            print(f"Attempt {attempt} for URL: {args[0]}")
+            print(f"Request kwargs: {kwargs}")
+            print(f"Using proxies: {kwargs.get('proxies')}")
             return requests.get(*args, **kwargs)
 
         except (RequestException, ConnectionError, Timeout, socket.error) as exc:
